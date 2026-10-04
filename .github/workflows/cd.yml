@@ -422,6 +422,7 @@ jobs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
     needs: [preflight, publish]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.publish.result == 'success' }}
     # The review gate. A protected environment holds this job until a required reviewer approves
     # it, which is the only thing standing between a merge and production.
     environment: production
