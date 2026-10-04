@@ -2,11 +2,15 @@
 # This file is a starting point, not a finished production configuration.
 
 
-environment          = "production"
-region               = "us-east-1"
-az_count             = 2
-db_instance_class    = "db.t3.micro"
-db_multi_az          = false
-db_allocated_storage = 20
+
+
+environment              = "production"
+region                   = "us-east-1"
+az_count                 = 2
+db_instance_class        = "db.t3.micro"
+db_multi_az              = false
+db_allocated_storage     = 20
 db_backup_retention_days = 1
+
+
 
