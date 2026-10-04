@@ -24,6 +24,8 @@ COPY --from=deps  --chown=app:app /app/node_modules ./node_modules
 # package.json declares no build script, so the source is the artifact and is copied as
 # it is. .dockerignore keeps node_modules and build noise out of the context.
 COPY --chown=app:app . .
+# AWS's global RDS authority, which the task's DB_CA_BUNDLE names. It rotates; the build date records which one.
+ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
 USER app
 # No EXPOSE: this process consumes a queue and listens on nothing.
 # No HTTP HEALTHCHECK: no static health endpoint was detected. Orchestration uses TCP.
