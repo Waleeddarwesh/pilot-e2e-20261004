@@ -1,0 +1,18 @@
+{
+  "name": "reference-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The serving half of the pilot-reference-ecs-v1 scenario.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "bullmq": "5.34.10",
+    "express": "4.22.3",
+    "ioredis": "5.4.2",
+    "pg": "8.13.1"
+  }
+}

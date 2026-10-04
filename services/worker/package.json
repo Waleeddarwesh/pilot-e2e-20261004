@@ -1,0 +1,17 @@
+{
+  "name": "reference-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The queue-consuming half of the pilot-reference-ecs-v1 scenario.",
+  "scripts": {
+    "start": "node consumer.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "bullmq": "5.34.10",
+    "ioredis": "5.4.2",
+    "pg": "8.13.1"
+  }
+}

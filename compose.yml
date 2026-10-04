@@ -1,0 +1,127 @@
+# The local stack this scenario is proved against, before anything reaches an account.
+#
+# Four containers, the same four shapes the generated deployment provisions: a database that
+# accepts no plaintext connection, a cache that accepts none either, the serving service and the
+# queue consumer. Nothing here is what AWS runs — it is where the *connection semantics* the
+# generator emits are shown to work, so that a failure in the cloud is a cloud failure rather than
+# an application one nobody had checked.
+#
+# **Nothing is published to the host.** The harness talks to these containers through
+# `docker compose exec`, so a published port would buy nothing and cost something: two runs would
+# collide on it, and a fixture that opens a database to the network is a fixture that ends up on a
+# laptop on a coffee-shop network.
+#
+# The project name is supplied per run by the harness rather than fixed here, so two runs cannot
+# share containers, networks or volumes — and so a teardown cannot reach anything this run did not
+# create.
+#
+# The certificate files this mounts are generated per run into a scratch directory. They are never
+# committed: a test CA in a repository is a real private key in a repository.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: reference
+      POSTGRES_USER: reference
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set by the harness}
+    # TLS required, not merely offered. The `pg_hba.conf` the harness writes contains `hostssl`
+    # lines and no `host` line, so a plaintext client is rejected by the server rather than
+    # quietly accepted — which is what `rds.force_ssl=1` does on RDS, and what makes the
+    # plaintext negative control mean something.
+    #
+    # The key is copied and chmod'd inside the container because PostgreSQL refuses to start with
+    # a group- or world-readable key, and a bind mount carries the host's permissions.
+    # One line, and a list rather than a folded scalar, because the folded form was wrong in a
+    # way nothing reported: a line indented further than the first keeps its newline, so the
+    # `-c` options ended up on their own lines inside the `sh -c` string. PostgreSQL started
+    # with none of them -- `ssl` off -- and the only symptom was the API failing to connect
+    # with "the server does not support SSL connections" after the container reported healthy,
+    # because `pg_isready` uses the local socket and never asks for TLS.
+    command:
+      - sh
+      - -c
+      - 'cp /tls/db.key /tmp/db.key && cp /tls/db.crt /tmp/db.crt && cp /tls/pg_hba.conf /tmp/pg_hba.conf && chown postgres:postgres /tmp/db.key /tmp/db.crt /tmp/pg_hba.conf && chmod 600 /tmp/db.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/db.crt -c ssl_key_file=/tmp/db.key -c ssl_ca_file=/tls/ca.crt -c hba_file=/tmp/pg_hba.conf'
+    volumes:
+      - ${TLS_DIR:?set by the harness}:/tls:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U reference -d reference']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    tmpfs:
+      # The data lives for the run and no longer. A volume would survive `down` and make the next
+      # run's result depend on the last one's.
+      - /var/lib/postgresql/data
+
+  cache:
+    image: redis:7-alpine
+    # `--port 0` closes the plaintext listener outright, which is what the generated ElastiCache
+    # group does with `transit_encryption_enabled`. A cache that still accepted plaintext would
+    # let a misconfigured client pass this stack and fail in the account.
+    command: >-
+      redis-server
+      --port 0
+      --tls-port 6380
+      --tls-cert-file /tls/cache.crt
+      --tls-key-file /tls/cache.key
+      --tls-ca-cert-file /tls/ca.crt
+      --tls-auth-clients no
+    volumes:
+      - ${TLS_DIR:?set by the harness}:/tls:ro
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'redis-cli --tls --cacert /tls/ca.crt -p 6380 ping | grep -q PONG'
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./services/api
+    environment:
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_NAME: reference
+      DB_USER: reference
+      DB_PASSWORD: ${DB_PASSWORD:?set by the harness}
+      # The same two the generated task definition binds. `verify-full` authenticates the server;
+      # encryption without authentication is protection against a listener and none against
+      # something answering in the database's place.
+      DB_SSL_MODE: verify-full
+      DB_CA_BUNDLE: /tls/ca.crt
+      REDIS_URL: rediss://cache:6380/0
+      NODE_EXTRA_CA_CERTS: /tls/ca.crt
+      PORT: '3000'
+    volumes:
+      - ${TLS_DIR:?set by the harness}:/tls:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./services/worker
+    environment:
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_NAME: reference
+      DB_USER: reference
+      DB_PASSWORD: ${DB_PASSWORD:?set by the harness}
+      DB_SSL_MODE: verify-full
+      DB_CA_BUNDLE: /tls/ca.crt
+      REDIS_URL: rediss://cache:6380/0
+      NODE_EXTRA_CA_CERTS: /tls/ca.crt
+    volumes:
+      - ${TLS_DIR:?set by the harness}:/tls:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      api:
+        # The API creates the table the worker writes to, so it starts first.
+        condition: service_started
